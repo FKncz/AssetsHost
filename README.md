@@ -3,10 +3,14 @@
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![deploy](https://img.shields.io/badge/deploy-Vercel-black)](https://vercel.com)
+[![live demo](https://img.shields.io/badge/live%20demo-online-brightgreen)](https://demoassets-host.vercel.app/)
 
 A self-hosted asset CDN. Log in with one password, upload files, get permanent
 public URLs, and manage everything from a dashboard. Built on Next.js 16, Vercel
 Blob, and Postgres, with a public gallery for the files you choose to list.
+
+**Live demo: [demoassets-host.vercel.app](https://demoassets-host.vercel.app/)** —
+password `outofmemory`. Nothing you do there persists.
 
 ```
 https://cdn.example.com/f/sunset-gradient.jpg
@@ -25,7 +29,8 @@ https://cdn.example.com/f/demo-clip.mp4
 - **Protect** the dashboard behind a single shared password and a signed session
   cookie. No user database to run.
 - **Try it first.** A zero-dependency demo mode runs the whole app with no
-  Postgres, Blob, or secrets, seeded with sample files.
+  Postgres, Blob, or secrets, seeded with sample files. There's one
+  [running here](https://demoassets-host.vercel.app/).
 
 Uploaded bytes live in Vercel Blob as **private** blobs. The only way to read
 them is through this app's CDN route, which is what makes deletes actually stick
@@ -58,9 +63,10 @@ Log in with the `AUTH_PASSWORD` you chose and start uploading. Pushes to `main`
 auto-deploy from then on, and you can pull upstream changes into your fork with
 GitHub's **Sync fork** button.
 
-Want to see it before committing to any of that? Deploy with `DEMO_MODE=true` and
-`NEXT_PUBLIC_DEMO_MODE=true` as the *only* env vars, no database, Blob store, or
-secrets needed. See [Demo mode](#demo-mode).
+Want to see it before committing to any of that? Try the
+[live demo](https://demoassets-host.vercel.app/) (password `outofmemory`), or deploy
+your own with `DEMO_MODE=true` and `NEXT_PUBLIC_DEMO_MODE=true` as the *only* env
+vars, no database, Blob store, or secrets needed. See [Demo mode](#demo-mode).
 
 ## Configuration
 
@@ -138,6 +144,12 @@ listing, a file appears in the gallery only when you toggle it on. This keeps
 "share this one link" and "put this on the public wall" as two different actions.
 
 ## Demo mode
+
+A demo instance is live at
+**[demoassets-host.vercel.app](https://demoassets-host.vercel.app/)** — log in with
+`outofmemory` (prefilled) and poke at everything. It's a real deploy of this repo
+with the two flags below and nothing else, so it costs no database and keeps no
+state.
 
 For an open-source showcase you can run the entire app with **no external
 services**: no Postgres, no Blob store, no secrets. Set both flags:
