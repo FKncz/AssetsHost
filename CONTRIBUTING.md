@@ -9,7 +9,12 @@ Bug reports, failing reproductions, and fixes are always welcome.
 
 ## Getting set up
 
+Fork [Creative-Softworks/AssetsHost](https://github.com/Creative-Softworks/AssetsHost),
+then:
+
 ```bash
+git clone https://github.com/YOUR-USERNAME/AssetsHost
+cd AssetsHost
 pnpm install
 cp .env.example .env   # then fill in the values
 pnpm db:push           # push the Drizzle schema to your database

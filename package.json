@@ -4,6 +4,14 @@
   "private": true,
   "description": "A self-hosted asset CDN: upload files, get permanent public URLs, and manage them from a password-protected dashboard. Built on Next.js, Vercel Blob, and Postgres.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Creative-Softworks/AssetsHost.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Creative-Softworks/AssetsHost/issues"
+  },
+  "homepage": "https://github.com/Creative-Softworks/AssetsHost#readme",
   "type": "module",
   "keywords": [
     "cdn",

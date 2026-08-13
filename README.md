@@ -31,21 +31,38 @@ Uploaded bytes live in Vercel Blob as **private** blobs. The only way to read
 them is through this app's CDN route, which is what makes deletes actually stick
 and lets the app own caching and headers.
 
-## Installation
+## Deploy your own
 
-```bash
-pnpm install
-```
+No local setup needed beyond one schema push, this runs on Vercel's free tier.
 
-Requires Node.js 22 (see `engines` in `package.json`), and pnpm.
+1. **Fork [Creative-Softworks/AssetsHost](https://github.com/Creative-Softworks/AssetsHost)**
+   with the Fork button at the top of the page.
+2. Open [vercel.com/new](https://vercel.com/new) and import your fork. Next.js is
+   auto-detected, so leave the build settings alone.
+3. In the project's **Storage** tab, create a **Blob store**. Vercel injects
+   `BLOB_READ_WRITE_TOKEN` for you.
+4. Still in **Storage**, add a **Postgres** database (or bring your own from Neon,
+   Supabase, etc.) and make sure `DATABASE_URL` is set.
+5. Under **Settings → Environment Variables**, add `SESSION_SECRET` and
+   `AUTH_PASSWORD` (see the table below).
+6. **Deploy.**
+7. Create the schema. This is the one step that needs the code locally, clone your
+   fork and run it against the production database:
 
-## Quick start
+   ```bash
+   psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+   DATABASE_URL="…" pnpm db:push
+   ```
 
-Copy the example environment file and fill it in:
+Log in with the `AUTH_PASSWORD` you chose and start uploading. Pushes to `main`
+auto-deploy from then on, and you can pull upstream changes into your fork with
+GitHub's **Sync fork** button.
 
-```bash
-cp .env.example .env
-```
+Want to see it before committing to any of that? Deploy with `DEMO_MODE=true` and
+`NEXT_PUBLIC_DEMO_MODE=true` as the *only* env vars, no database, Blob store, or
+secrets needed. See [Demo mode](#demo-mode).
+
+## Configuration
 
 | Variable | Required | What it is |
 |---|---|---|
@@ -71,9 +88,16 @@ extension. Enable it once before pushing the schema:
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
-Then push the schema and start the dev server:
+## Running locally
+
+Only needed if you want to hack on the code, deploying doesn't require it.
+Requires Node.js 22 (see `engines` in `package.json`), and pnpm.
 
 ```bash
+git clone https://github.com/YOUR-USERNAME/AssetsHost
+cd AssetsHost
+pnpm install
+cp .env.example .env   # then fill it in
 pnpm db:push
 pnpm dev
 ```
@@ -81,6 +105,9 @@ pnpm dev
 Open http://localhost:5000. The landing page has two doors: the public
 **gallery**, and the **control panel** (`/control-panel`), which prompts for your
 `AUTH_PASSWORD`.
+
+For a look around with no database or Blob store at all, put `DEMO_MODE=true` and
+`NEXT_PUBLIC_DEMO_MODE=true` in `.env` and skip straight to `pnpm dev`.
 
 ## How auth works
 
@@ -160,20 +187,12 @@ src/
 └── lib/…                        ← upload client, filename/mime helpers, formatters
 ```
 
-## Deploying to Vercel
+## Serving from your own domain
 
-1. Push this repo to GitHub.
-2. Import it into Vercel (Next.js is auto-detected).
-3. Create a **Vercel Blob store**, which auto-injects `BLOB_READ_WRITE_TOKEN`.
-4. Add the rest of the environment variables (see the table above).
-5. Deploy.
-6. Run `pnpm db:push` locally, pointed at your production `DATABASE_URL`, to push
-   the schema. Remember to `CREATE EXTENSION IF NOT EXISTS pg_trgm;` on the
-   production database first.
-
-Pushes to `main` auto-deploy. For a public showcase, deploy a second project off
-the same repo with `DEMO_MODE=true` and `NEXT_PUBLIC_DEMO_MODE=true`; it needs no
-`DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`, or `AUTH_PASSWORD`.
+Point a subdomain like `cdn.example.com` at the Vercel project, then set both
+`CDN_HOST` and `NEXT_PUBLIC_CDN_HOST` to it. Public URLs become
+`https://cdn.example.com/f/:name` instead of falling back to the deployment URL.
+The CDN route is host agnostic, so the dashboard keeps working on either host.
 
 ## Scripts
 
@@ -189,6 +208,12 @@ pnpm db:push    # push the Drizzle schema to your database
 
 Contributions are welcome, see [CONTRIBUTING.md](./CONTRIBUTING.md) for how to get
 set up and what to check before opening a pull request.
+
+## A note from the dev
+
+When I made this project, I smoked 3 kg of ganja, so I have no idea what I made. After finishing it, I ran React Doctor, and it showed 370+ errors of all kinds, so I gave up and handed the project to Claude, which overnight rewrote 60% of the website and added new UI and features. Now everything works. I tested it all out, found nothing bad, and I'm not going to use this project that often anyway, so why not make it open source?
+
+Now here we are. You can use it, do whatever you want with it, just don't share so-called illegal files with it. 👍
 
 ## License
 
