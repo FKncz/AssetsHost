@@ -27,3 +27,30 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* shiny text => the gradient is clipped to the glyphs, so sliding the background sweeps a
+   highlight across them. vars come from the ShinyText component's inline style. */
+.shiny-text {
+  display: inline-block;
+  background-size: 200% auto;
+  background-position: 150% center;
+  animation: shine var(--shine-duration, 2s) linear infinite;
+  animation-delay: var(--shine-delay, 0s);
+  animation-direction: var(--shine-direction, normal);
+}
+
+@keyframes shine {
+  from {
+    background-position: 150% center;
+  }
+  to {
+    background-position: -50% center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shiny-text {
+    animation: none;
+    background-position: 50% center;
+  }
+}

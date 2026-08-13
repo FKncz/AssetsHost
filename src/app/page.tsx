@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { Images, LockKeyhole } from 'lucide-react';
 
+import { ShinyText } from '@/components/ui/shiny-text';
+
 /** Public landing => two doors. The gallery is open; the control panel is behind login. */
 export default function LandingPage() {
   return (
@@ -35,27 +37,45 @@ export default function LandingPage() {
           </Link>
         </div>
 
-        {/* credits => tiny line under the two doors, handles link out to GitHub */}
-        <p className="text-center text-[11px] leading-relaxed text-[var(--color-muted)]">
-          @ Reversal{' '}
-          <a
-            href="https://github.com/revxshafi"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline decoration-dotted underline-offset-2 transition-colors hover:text-[var(--color-accent)]"
-          >
-            (revxshafi)
-          </a>{' '}
-          <span aria-hidden>·</span> @ Creative Softworks{' '}
-          <a
-            href="https://github.com/Creative-Softworks"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline decoration-dotted underline-offset-2 transition-colors hover:text-[var(--color-accent)]"
-          >
-            (Creative-Softworks)
-          </a>
-        </p>
+        {/* credits => closing hairline, then the two names as links out to GitHub */}
+        <footer className="space-y-3 pt-2">
+          <div className="h-px w-full bg-gradient-to-r from-transparent via-[var(--color-border)] to-transparent" />
+          <p className="text-center text-xs text-[var(--color-muted)]">
+            Built by{' '}
+            <a
+              href="https://github.com/revxshafi"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Reversal on GitHub (revxshafi)"
+              className="rounded px-0.5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            >
+              <ShinyText
+                text="Reversal"
+                speed={3.5}
+                color="oklch(0.58 0.012 265)"
+                shineColor="oklch(0.96 0.004 265)"
+                className="font-medium"
+              />
+            </a>{' '}
+            <span aria-hidden>•</span>{' '}
+            <a
+              href="https://github.com/Creative-Softworks"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Creative Softworks on GitHub"
+              className="rounded px-0.5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            >
+              <ShinyText
+                text="Creative Softworks"
+                speed={3.5}
+                delay={0.6}
+                color="oklch(0.58 0.012 265)"
+                shineColor="oklch(0.96 0.004 265)"
+                className="font-medium"
+              />
+            </a>
+          </p>
+        </footer>
       </div>
     </main>
   );
