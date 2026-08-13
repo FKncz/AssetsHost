@@ -34,6 +34,28 @@ export default function LandingPage() {
             </div>
           </Link>
         </div>
+
+        {/* credits => tiny line under the two doors, handles link out to GitHub */}
+        <p className="text-center text-[11px] leading-relaxed text-[var(--color-muted)]">
+          @ Reversal{' '}
+          <a
+            href="https://github.com/revxshafi"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted underline-offset-2 transition-colors hover:text-[var(--color-accent)]"
+          >
+            (revxshafi)
+          </a>{' '}
+          <span aria-hidden>·</span> @ Creative Softworks{' '}
+          <a
+            href="https://github.com/Creative-Softworks"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted underline-offset-2 transition-colors hover:text-[var(--color-accent)]"
+          >
+            (Creative-Softworks)
+          </a>
+        </p>
       </div>
     </main>
   );
