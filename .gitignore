@@ -1,0 +1,56 @@
+# dependencies
+node_modules
+.pnpm-store
+
+# env files (never commit real secrets)
+.env
+.env.local
+.env.development
+.env.production
+.env*.local
+
+# next.js build output
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+
+# drizzle migration artifacts
+drizzle
+
+# vercel
+.vercel
+
+# logs & debug output
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# test & coverage output
+coverage
+.nyc_output
+
+# local tooling / editor / agent artifacts
+.claude
+.agent
+.agents
+.config
+.cache
+.local
+.npm
+.upm
+.idea
+.vscode
+skills-lock.json
+CLAUDE.md
+
+# os junk
+.DS_Store
+Thumbs.db
+
+# replit
+.replit
+.replitignore
+.pnpm-workspace.yaml

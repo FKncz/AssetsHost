@@ -1,0 +1,58 @@
+{
+  "name": "assetshost",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A self-hosted asset CDN: upload files, get permanent public URLs, and manage them from a password-protected dashboard. Built on Next.js, Vercel Blob, and Postgres.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "cdn",
+    "file-hosting",
+    "file-upload",
+    "vercel-blob",
+    "nextjs",
+    "self-hosted"
+  ],
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "next dev -p 5000 -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -p 5000 -H 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.6.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "lucide-react": "^0.545.0",
+    "next": "16.2.12",
+    "postgres": "^3.4.9",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "tailwind-merge": "^3.6.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "^25.3.3",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "drizzle-kit": "^0.31.10",
+    "tailwindcss": "4.3.3",
+    "typescript": "~5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@tailwindcss/oxide"
+    ],
+    "overrides": {
+      "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
+      "esbuild": "0.27.3"
+    }
+  }
+}
