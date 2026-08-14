@@ -2,6 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
 import { isDemoMode } from '@/lib/demo';
+import { ensureSchema } from './bootstrap';
 import * as schema from './schema';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -27,13 +28,13 @@ function connect(): Db {
   return cached;
 }
 
-// the proxy defers connect() to the first property access (any real query), so `import { db }`
-// has no side effects. methods are bound to the real instance => drizzle internals that use
-// `this` (or private fields) never see the proxy.
-export const db: Db = new Proxy({} as Db, {
-  get(_target, prop) {
-    const real = connect() as unknown as Record<string | symbol, unknown>;
-    const value = real[prop];
-    return typeof value === 'function' ? value.bind(real) : value;
-  },
-});
+/**
+ * The only way to reach Postgres. Awaiting the bootstrap here rather than exporting a `db`
+ * singleton is deliberate => you can't query a database whose schema hasn't been ensured,
+ * because you can't get the handle without going through it. ensureSchema() is memoized, so
+ * every call after the first in a given server instance is free.
+ */
+export async function getdb(): Promise<Db> {
+  await ensureSchema();
+  return connect();
+}

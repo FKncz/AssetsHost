@@ -38,7 +38,7 @@ and lets the app own caching and headers.
 
 ## Deploy your own
 
-No local setup needed beyond one schema push, this runs on Vercel's free tier.
+No local setup at all, this runs on Vercel's free tier.
 
 1. **Fork [Creative-Softworks/AssetsHost](https://github.com/Creative-Softworks/AssetsHost)**
    with the Fork button at the top of the page.
@@ -51,13 +51,11 @@ No local setup needed beyond one schema push, this runs on Vercel's free tier.
 5. Under **Settings → Environment Variables**, add `SESSION_SECRET` and
    `AUTH_PASSWORD` (see the table below).
 6. **Deploy.**
-7. Create the schema. This is the one step that needs the code locally, clone your
-   fork and run it against the production database:
 
-   ```bash
-   psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-   DATABASE_URL="…" pnpm db:push
-   ```
+That's it, there's no schema step. On its first boot the app creates its own tables,
+indexes and the `pg_trgm` extension in whatever database `DATABASE_URL` points at,
+then records what it did so later boots skip straight past. Point it at an empty
+Neon or Supabase database and it just works.
 
 Log in with the `AUTH_PASSWORD` you chose and start uploading. Pushes to `main`
 auto-deploy from then on, and you can pull upstream changes into your fork with
@@ -80,6 +78,7 @@ vars, no database, Blob store, or secrets needed. See [Demo mode](#demo-mode).
 | `NEXT_PUBLIC_CDN_HOST` | – | Same value, exposed to the browser for building public URLs |
 | `DEMO_MODE` | – | Set to `true` to run the zero-dependency showcase (see [Demo mode](#demo-mode)) |
 | `NEXT_PUBLIC_DEMO_MODE` | – | Same value, exposed to the browser |
+| `SKIP_DB_BOOTSTRAP` | – | Set to `true` to stop the app creating its own schema (see [Schema bootstrap](#schema-bootstrap)) |
 
 Generate a `SESSION_SECRET`:
 
@@ -87,12 +86,24 @@ Generate a `SESSION_SECRET`:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-The filename search uses a trigram index, which needs the Postgres `pg_trgm`
-extension. Enable it once before pushing the schema:
+## Schema bootstrap
 
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-```
+The app provisions its own database. On every server start it reads one marker row
+(`assetshost_meta`); if it says the schema is current, nothing else happens. If the
+marker is missing or stale it runs the `create … if not exists` DDL in
+`src/server/db/bootstrap.ts` — the `files` table, its indexes, and the `pg_trgm`
+extension that the filename search index needs — then writes the marker. So an empty
+database becomes a working one on first boot, and an existing one costs a single query.
+
+Two things worth knowing:
+
+- **If the role can't create extensions**, `pg_trgm` is skipped and so is that one
+  index. Search still works, it just falls back to a slower scan. The marker records
+  the partial state, so a later boot with a privileged role finishes the job. You can
+  also do it by hand once: `CREATE EXTENSION IF NOT EXISTS pg_trgm;`
+- **If the role can't create anything at all** but the tables already exist, the app
+  logs a warning and carries on. To manage the schema yourself, run `pnpm db:push`
+  and set `SKIP_DB_BOOTSTRAP=true`.
 
 ## Running locally
 
@@ -104,13 +115,16 @@ git clone https://github.com/YOUR-USERNAME/AssetsHost
 cd AssetsHost
 pnpm install
 cp .env.example .env   # then fill it in
-pnpm db:push
 pnpm dev
 ```
 
 Open http://localhost:5000. The landing page has two doors: the public
 **gallery**, and the **control panel** (`/control-panel`), which prompts for your
 `AUTH_PASSWORD`.
+
+The first `pnpm dev` creates the schema in whatever `DATABASE_URL` points at. If you're
+changing `src/server/db/schema.ts` you'll want `pnpm db:push` as well, which is the
+authoritative Drizzle sync — see [Schema bootstrap](#schema-bootstrap).
 
 For a look around with no database or Blob store at all, put `DEMO_MODE=true` and
 `NEXT_PUBLIC_DEMO_MODE=true` in `.env` and skip straight to `pnpm dev`.
@@ -178,6 +192,7 @@ gated, so self-hosters get the normal app with zero overhead.
 ```
 src/
 ├── middleware.ts                 ← auth guard + /f/ public file alias
+├── instrumentation.ts            ← runs the schema bootstrap at server start
 ├── app/
 │   ├── page.tsx                  ← public landing (gallery + control-panel links)
 │   ├── login/page.tsx            ← password login
@@ -195,6 +210,7 @@ src/
 │   ├── services/                 ← files.service.ts, storage.service.ts (Blob boundary)
 │   ├── demo/                     ← in-memory dataset used only in demo mode
 │   ├── db/schema.ts              ← Drizzle schema
+│   ├── db/bootstrap.ts           ← creates the schema on first boot
 │   └── auth/…                   ← session tokens + password verification
 └── lib/…                        ← upload client, filename/mime helpers, formatters
 ```
@@ -213,7 +229,7 @@ pnpm dev        # start the dev server on port 5000
 pnpm build      # production build
 pnpm start      # serve the production build
 pnpm typecheck  # type-check without emitting
-pnpm db:push    # push the Drizzle schema to your database
+pnpm db:push    # push the Drizzle schema (bootstrap handles a normal deploy)
 ```
 
 ## Contributing

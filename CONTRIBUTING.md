@@ -17,9 +17,14 @@ git clone https://github.com/YOUR-USERNAME/AssetsHost
 cd AssetsHost
 pnpm install
 cp .env.example .env   # then fill in the values
-pnpm db:push           # push the Drizzle schema to your database
 pnpm dev               # http://localhost:5000
 ```
+
+The app creates its own schema on first boot (`src/server/db/bootstrap.ts`), so there's
+no setup step. If you change `src/server/db/schema.ts`, mirror the change into that
+file's `CORE_DDL` and bump its `SCHEMA_VERSION` — in dev the bootstrap warns when a
+column exists in the schema but not in the database. `pnpm db:push` stays the
+authoritative Drizzle sync and is what you should check your DDL against.
 
 Node.js 22, and pnpm. See the [README](./README.md) for what each
 environment variable does. To poke at the app with no database or Blob store,
@@ -36,7 +41,7 @@ pnpm dev        # start the dev server on port 5000
 pnpm build      # production build
 pnpm start      # serve the production build
 pnpm typecheck  # tsc --noEmit
-pnpm db:push    # push the Drizzle schema to your database
+pnpm db:push    # push the Drizzle schema (bootstrap handles a normal deploy)
 ```
 
 Before opening a pull request, `pnpm typecheck && pnpm build` should both pass.

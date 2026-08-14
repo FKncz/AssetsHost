@@ -29,7 +29,7 @@
     "build": "next build",
     "start": "next start -p 5000 -H 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "db:push": "drizzle-kit push"
+    "db:push": "node scripts/db-push.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.6.1",

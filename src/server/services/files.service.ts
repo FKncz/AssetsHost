@@ -4,7 +4,7 @@ import type { FileCategory } from '@/lib/mime';
 
 import { splitFilename, uniquifyPathname } from '@/lib/filename';
 import { getFileTypeSpec, isAllowedExtension } from '@/lib/mime';
-import { db } from '../db/client';
+import { getdb } from '../db/client';
 import { files, type FileRow } from '../db/schema';
 
 const PENDING_TTL_MS = 60 * 60 * 1000;
@@ -17,6 +17,7 @@ export class UnsupportedFileTypeError extends Error {}
  * index decides the winner & the loser retries against a now-larger taken set.
  */
 export async function reserveUpload(originalFilename: string): Promise<FileRow> {
+  const db = await getdb();
   const { stem, extension } = splitFilename(originalFilename);
 
   if (!isAllowedExtension(extension)) {
@@ -68,6 +69,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export async function findPendingById(id: string): Promise<FileRow | null> {
+  const db = await getdb();
   const [row] = await db.select().from(files).where(and(eq(files.id, id), eq(files.status, 'pending'))).limit(1);
   return row ?? null;
 }
@@ -76,6 +78,7 @@ export async function markReady(
   id: string,
   metadata: { size: number; contentType: string; etag: string; blobUrl: string },
 ): Promise<FileRow | null> {
+  const db = await getdb();
   const [row] = await db
     .update(files)
     .set({
@@ -91,11 +94,13 @@ export async function markReady(
 }
 
 export async function discardReservation(id: string): Promise<void> {
+  const db = await getdb();
   await db.delete(files).where(and(eq(files.id, id), eq(files.status, 'pending')));
 }
 
 /** Serves the CDN route: only live, fully uploaded files are publicly reachable. */
 export async function findServableByName(name: string): Promise<FileRow | null> {
+  const db = await getdb();
   // pathname always has an extension (contains a dot); customName never does, so
   // matching either column can't return two different files for one URL segment.
   const [row] = await db
@@ -113,6 +118,7 @@ export async function findServableByName(name: string): Promise<FileRow | null> 
 }
 
 export async function sweepStalePending(): Promise<void> {
+  const db = await getdb();
   await db
     .delete(files)
     .where(and(eq(files.status, 'pending'), lt(files.createdAt, new Date(Date.now() - PENDING_TTL_MS))));
@@ -135,6 +141,7 @@ export type ListFilesResult = {
 };
 
 export async function listFiles({ q, category, cursor, limit = 50, listedOnly = false }: ListFilesOptions): Promise<ListFilesResult> {
+  const db = await getdb();
   const cap = Math.min(limit, 100);
 
   const conditions: ReturnType<typeof eq>[] = [
@@ -187,6 +194,7 @@ export async function listFiles({ q, category, cursor, limit = 50, listedOnly = 
 
 /** Soft delete: sets trashedAt. The blob itself is NOT removed. */
 export async function trashFile(id: string): Promise<FileRow | null> {
+  const db = await getdb();
   const [row] = await db
     .update(files)
     .set({ trashedAt: new Date() })
@@ -197,6 +205,7 @@ export async function trashFile(id: string): Promise<FileRow | null> {
 
 /** Flips gallery visibility. Off => URL-only; on => shown in the public browse. */
 export async function setListed(id: string, listed: boolean): Promise<FileRow | null> {
+  const db = await getdb();
   const [row] = await db
     .update(files)
     .set({ listed })
@@ -212,6 +221,7 @@ export class CustomNameTakenError extends Error {}
  * a collision surfaces as a 23505 which we translate rather than leak.
  */
 export async function setCustomName(id: string, customName: string | null): Promise<FileRow | null> {
+  const db = await getdb();
   try {
     const [row] = await db
       .update(files)
@@ -232,6 +242,7 @@ export type FileStats = {
 };
 
 export async function getStats(): Promise<FileStats> {
+  const db = await getdb();
   const ready = and(eq(files.status, 'ready'), isNull(files.trashedAt));
 
   // two independent aggregates over the same table => fire them together instead

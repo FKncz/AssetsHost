@@ -46,3 +46,14 @@ export const files = pgTable(
 
 export type FileRow = typeof files.$inferSelect;
 export type NewFileRow = typeof files.$inferInsert;
+
+/**
+ * Bookkeeping for the boot time schema bootstrap (src/server/db/bootstrap.ts): it stores the
+ * schema version it last applied under the key "schema_version". Declared here too so drizzle
+ * knows the table is ours & db:push doesn't try to drop it.
+ */
+export const meta = pgTable('assetshost_meta', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
