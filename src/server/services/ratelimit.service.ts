@@ -7,18 +7,34 @@ import { getdb } from '../db/client';
 import { unlockAttempts } from '../db/schema';
 
 /**
- * Rate limiting for the unlock endpoint. Two caps per window:
- *   - 5 per (file, client) => stops the obvious brute force
- *   - 30 per file          => backstop for an attacker rotating IPs, or for a proxy that
- *                             strips x-forwarded-for & collapses every visitor to "unknown"
+ * Fixed window rate limiting for the two password prompts in the app: the per-file unlock
+ * endpoint & the dashboard login. Both get a per-client cap plus a wider backstop:
  *
- * Fixed window, in Postgres. A sliding window buys nothing against a 5-try limit, & a
- * process local Map would reset on every Vercel cold start.
+ *   unlock  5 per (file, client) => stops the obvious brute force
+ *          30 per file           => backstop for an attacker rotating IPs, or for a proxy that
+ *                                   strips x-forwarded-for & collapses every visitor to "unknown"
+ *   login  10 per client         => a real owner mistypes twice, not ten times
+ *         120 across the app     => same rotating-IP backstop, but deliberately loose (see below)
+ *
+ * In Postgres, not a process local Map: Vercel runs many short lived instances, so an in-memory
+ * counter resets on every cold start, which is the same as no limit at all. A sliding window
+ * buys nothing against caps this small. Counters share one table & are kept apart by their key
+ * prefix ("<fileId>:…" vs "login:…") — a uuid can never spell "login", so they can't collide.
  */
 
 const WINDOW_SECONDS = 10 * 60;
 const PER_CLIENT_LIMIT = 5;
 const PER_FILE_LIMIT = 30;
+/**
+ * Login is the door to everything, so it's capped harder per client than a file unlock is. The
+ * global cap is the awkward one: it has to bound an IP rotating attacker without handing that
+ * same attacker a way to lock the owner out of their own dashboard for 10 minutes. 120 is the
+ * compromise — far past any honest typo streak, still only ~17k guesses a day, & on Vercel
+ * (where x-forwarded-for is set by the platform, not the caller) the per-client cap is the one
+ * doing the real work anyway.
+ */
+const LOGIN_PER_CLIENT_LIMIT = 10;
+const LOGIN_GLOBAL_LIMIT = 120;
 /** rows this old can't be inside anyone's window any more */
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
@@ -38,10 +54,15 @@ const WINDOW = sql.raw(`interval '${WINDOW_SECONDS} seconds'`);
  * Client identity is the first x-forwarded-for hop (Vercel appends the real client there),
  * HMAC'd & truncated => the limiter works without keeping raw IPs at rest.
  */
-export async function clientKeyFor(request: Request, fileId: string): Promise<AttemptKey[]> {
+async function clientDigest(request: Request): Promise<string> {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
   const ip = forwarded || request.headers.get('x-real-ip')?.trim() || 'unknown';
-  const digest = (await hmacSign(config.sessionSecret, `ratelimit:${ip}`)).slice(0, 24);
+  return (await hmacSign(config.sessionSecret, `ratelimit:${ip}`)).slice(0, 24);
+}
+
+/** Keys for one unlock attempt on one file. */
+export async function clientKeyFor(request: Request, fileId: string): Promise<AttemptKey[]> {
+  const digest = await clientDigest(request);
 
   return [
     { key: `${fileId}:ip:${digest}`, limit: PER_CLIENT_LIMIT },
@@ -49,9 +70,21 @@ export async function clientKeyFor(request: Request, fileId: string): Promise<At
   ];
 }
 
+/** Keys for one dashboard login attempt. Not per-file, so it gets its own namespace. */
+export async function loginKeysFor(request: Request): Promise<AttemptKey[]> {
+  const digest = await clientDigest(request);
+  const keys: AttemptKey[] = [{ key: `login:ip:${digest}`, limit: LOGIN_PER_CLIENT_LIMIT }];
+
+  // the demo password is printed on the login page, so there's nothing to brute force there &
+  // the global cap would only let one bored visitor wall the door off for everyone else.
+  if (!isDemoMode()) keys.push({ key: 'login:all', limit: LOGIN_GLOBAL_LIMIT });
+
+  return keys;
+}
+
 /**
- * Counts one attempt against every key & reports whether the request may proceed. Called
- * BEFORE the KDF runs, so 210k PBKDF2 iterations can't be used as a CPU amplifier.
+ * Counts one attempt against every key & reports whether the request may proceed. Callers run
+ * this BEFORE checking the password, so 210k PBKDF2 iterations can't be used as a CPU amplifier.
  */
 export async function consumeAttempt(keys: AttemptKey[]): Promise<AttemptResult> {
   if (isDemoMode()) return consumeInMemory(keys);

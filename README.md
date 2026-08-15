@@ -218,6 +218,15 @@ goes out into the world, the stamp stays put.
 The token is *signed*, not *encrypted*, its contents (just an expiry time) are
 readable, but only your server can produce a valid signature for them.
 
+**Guessing the login is capped**, 10 tries per visitor per 10 minutes, plus 120
+across the whole instance so rotating IPs doesn't buy much. Over the cap the login
+answers "too many attempts" and tells the page how long to wait; signing in
+successfully clears your own count, so an honest typo streak costs nothing. The
+same caveat as the file passwords applies: without a trusted proxy in front of the
+app the per-visitor cap can be sidestepped by faking the client IP, which is what
+the instance-wide cap is there to bound. `AUTH_PASSWORD` still wants to be a real
+password, nothing enforces a length.
+
 ## Public access and the "listed" model
 
 Every uploaded file gets a permanent public URL, and anyone with that URL can
@@ -352,6 +361,18 @@ node scripts/smoke-protected.mjs
 It inserts a temporary protected row, asserts that the file is unreachable while
 locked, that unlocking works, that a password change revokes access, that guessing
 gets rate limited, then deletes what it made.
+
+And one for the login rate limit, which needs the same `AUTH_PASSWORD` the server
+is running with:
+
+```bash
+node scripts/smoke-login-limit.mjs
+```
+
+It walks the per-visitor cap to a 429, checks another visitor isn't caught by it,
+that a correct password can't step past the cap, and that signing in clears the
+count. It only runs against localhost, since burning the limiter on a live
+instance would lock you out for a window.
 
 ## Contributing
 

@@ -72,14 +72,18 @@ export const fileProtections = pgTable('file_protections', {
 });
 
 /**
- * Fixed window counters for the unlock endpoint. In Postgres rather than a process local Map
- * because Vercel runs many short lived instances => an in-memory counter resets on every cold
- * start, which is the same as no limit at all.
+ * Fixed window counters for the password prompts (unlock + dashboard login). In Postgres rather
+ * than a process local Map because Vercel runs many short lived instances => an in-memory counter
+ * resets on every cold start, which is the same as no limit at all. Kept its original name so
+ * there's no migration for what is only a widened use.
  */
 export const unlockAttempts = pgTable(
   'unlock_attempts',
   {
-    /** "<fileId>:ip:<hmac>" for one client, "<fileId>:all" for the per-file backstop. */
+    /**
+     * "<fileId>:ip:<hmac>" for one client on one file, "<fileId>:all" for the per-file backstop,
+     * "login:ip:<hmac>" & "login:all" for the dashboard login.
+     */
     key: text('key').primaryKey(),
     attempts: integer('attempts').notNull().default(0),
     windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull().defaultNow(),
