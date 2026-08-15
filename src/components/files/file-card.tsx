@@ -228,7 +228,7 @@ export function FileCard({ file, onDelete }: FileCardProps) {
         </button>
         {isProtected && (
           <span
-            title="Password protected — only /p/:slug works for a recipient"
+            title="Password protected — recipients need the password to open it"
             className="absolute left-2 top-2 flex items-center gap-1 rounded-md bg-amber-500/90 px-2 py-1 text-xs font-medium text-white backdrop-blur"
           >
             <Lock size={12} />
@@ -296,9 +296,9 @@ export function FileCard({ file, onDelete }: FileCardProps) {
                 <input
                   type="password"
                   value={passwordDraft}
-                  aria-label={isProtected ? 'New password' : 'Password'}
+                  aria-label={isProtected ? 'New file password' : 'File password'}
                   onChange={(e) => setPasswordDraft(e.target.value)}
-                  placeholder={isProtected ? 'New password' : 'Password'}
+                  placeholder={isProtected ? 'New password' : 'Password (6+ characters)'}
                   className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-amber-500"
                 />
                 <Button
@@ -327,17 +327,23 @@ export function FileCard({ file, onDelete }: FileCardProps) {
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingPassword(true)}
-                className={`flex items-center gap-1 text-left text-xs transition-colors ${
-                  isProtected
-                    ? 'text-amber-400 hover:text-amber-300'
-                    : 'text-[var(--color-muted)] hover:text-[var(--color-fg)]'
+              {/* one label for the state, one verb for the action => the card reads as the same
+                  "file password" the upload toggle sets, not as a second kind of password. */}
+              <span
+                className={`flex items-center gap-1 text-xs ${
+                  isProtected ? 'text-amber-400' : 'text-[var(--color-muted)]'
                 }`}
               >
                 <Lock size={11} />
-                {isProtected ? 'Change password' : 'Add password'}
+                {isProtected ? 'Protected' : 'File password'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setEditingPassword(true)}
+                aria-label={isProtected ? 'Change the file password' : 'Add a file password'}
+                className="text-xs text-[var(--color-muted)] underline decoration-dotted underline-offset-2 transition-colors hover:text-[var(--color-fg)]"
+              >
+                {isProtected ? 'Change' : 'Add'}
               </button>
               {isProtected && (
                 /* same two-step the delete button uses => removing a password unlocks the bytes
@@ -353,7 +359,7 @@ export function FileCard({ file, onDelete }: FileCardProps) {
                     savePassword('');
                   }}
                   disabled={savingPassword}
-                  aria-label={confirmingUnprotect ? 'Confirm remove password' : 'Remove password'}
+                  aria-label={confirmingUnprotect ? 'Confirm remove password' : 'Remove the file password'}
                   className="ml-auto flex items-center gap-1 text-xs text-[var(--color-muted)] transition-colors hover:text-red-400"
                 >
                   <LockOpen size={11} />

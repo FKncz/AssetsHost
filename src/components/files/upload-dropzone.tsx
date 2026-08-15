@@ -178,7 +178,7 @@ export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
               className="accent-[var(--color-accent)]"
             />
             <Lock size={13} className="text-[var(--color-muted)]" />
-            Protect these uploads with a password
+            Lock these uploads with a password
           </label>
 
           {protecting && (
@@ -192,7 +192,7 @@ export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
                 onChange={(e) => setPassword(e.target.value)}
               />
               <p className="text-xs text-[var(--color-muted)]">
-                Each file gets a /p/ share link & its bytes stay unreachable until the password is entered.
+                Recipients need the password to open them.
               </p>
             </div>
           )}
