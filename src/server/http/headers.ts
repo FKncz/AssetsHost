@@ -46,3 +46,17 @@ export function applyPublicCors(headers: Headers): void {
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Timing-Allow-Origin', '*');
 }
+
+/**
+ * For a password protected file, used INSTEAD OF applyPublicCors + IMMUTABLE_CACHE_CONTROL.
+ * That pair is the single most dangerous thing that could survive onto a protected response:
+ * Vercel's edge cache (or any shared proxy) would happily keep the bytes for a year & hand
+ * them to the next anonymous caller, & wildcard CORS would let any page fetch them.
+ */
+export function applyPrivateHeaders(headers: Headers): void {
+  headers.set('Cache-Control', 'private, no-store, max-age=0');
+  headers.set('Vary', 'Cookie');
+  headers.set('X-Robots-Tag', 'noindex, nofollow');
+  headers.delete('Access-Control-Allow-Origin');
+  headers.delete('Timing-Allow-Origin');
+}

@@ -2,21 +2,32 @@ import { and, count, desc, eq, ilike, inArray, isNull, isNotNull, lt, sql } from
 
 import type { FileCategory } from '@/lib/mime';
 
-import { splitFilename, uniquifyPathname } from '@/lib/filename';
+import { deriveSlug, splitFilename, uniquifyPathname, uniquifySlug } from '@/lib/filename';
+import { hashPassword } from '@/lib/crypto';
 import { getFileTypeSpec, isAllowedExtension } from '@/lib/mime';
 import { getdb } from '../db/client';
-import { files, type FileRow } from '../db/schema';
+import { fileProtections, files, type FileRow } from '../db/schema';
 
 const PENDING_TTL_MS = 60 * 60 * 1000;
 
 export class UnsupportedFileTypeError extends Error {}
 
+export type ReserveOptions = {
+  /** Set => the file is born protected, while it is still pending & therefore unservable. */
+  password?: string;
+};
+
 /**
  * Allocates a unique pathname & reserves it with a pending row before any bytes move.
  * The reservation is what makes concurrent uploads of the same filename safe: the unique
  * index decides the winner & the loser retries against a now-larger taken set.
+ *
+ * A password is applied here rather than at /api/upload/complete on purpose: onUploadCompleted
+ * (api/upload/token) can flip a row to 'ready' before the client's complete call lands, which
+ * would leave a protected file briefly readable in the clear at /f/:pathname. A pending row is
+ * never servable, so protecting it here closes that window.
  */
-export async function reserveUpload(originalFilename: string): Promise<FileRow> {
+export async function reserveUpload(originalFilename: string, options: ReserveOptions = {}): Promise<FileRow> {
   const db = await getdb();
   const { stem, extension } = splitFilename(originalFilename);
 
@@ -25,9 +36,15 @@ export async function reserveUpload(originalFilename: string): Promise<FileRow> 
   }
   const spec = getFileTypeSpec(extension)!;
 
+  // hashed once up front => a retry doesn't pay for 210k PBKDF2 iterations again, & no KDF
+  // work happens inside the transaction.
+  const passwordHash = options.password ? await hashPassword(options.password) : null;
+  const slugBase = passwordHash ? deriveSlug(originalFilename) : null;
+
   // names we have personally lost a race for. carrying these across attempts stops us
   // re-proposing a candidate a competitor already took, so each retry makes progress.
   const lost = new Set<string>();
+  const lostSlugs = new Set<string>();
 
   for (let attempt = 0; attempt < 25; attempt++) {
     // narrow the collision check to plausible neighbours. sanitizeStem already excludes
@@ -40,27 +57,63 @@ export async function reserveUpload(originalFilename: string): Promise<FileRow> 
 
     const taken = new Set([...rows.map((r) => r.pathname), ...lost]);
     const pathname = uniquifyPathname(stem, extension, taken);
+    const slug = slugBase ? uniquifySlug(slugBase, new Set([...(await takenSlugs(slugBase)), ...lostSlugs])) : null;
 
     try {
-      const [row] = await db
-        .insert(files)
-        .values({
-          pathname,
-          extension,
-          blobPathname: pathname,
-          contentType: spec.mime,
-          status: 'pending',
-        })
-        .returning();
+      // no password => a plain insert, exactly as before. with one, the file row & its hash
+      // land together so there is no instant where a protected row exists unprotected.
+      const row = passwordHash
+        ? await db.transaction(async (tx) => {
+            const [inserted] = await tx
+              .insert(files)
+              .values({
+                pathname,
+                extension,
+                customName: slug,
+                blobPathname: pathname,
+                contentType: spec.mime,
+                status: 'pending',
+                protectedAt: new Date(),
+              })
+              .returning();
+            await tx.insert(fileProtections).values({ fileId: inserted.id, passwordHash });
+            return inserted;
+          })
+        : (
+            await db
+              .insert(files)
+              .values({
+                pathname,
+                extension,
+                blobPathname: pathname,
+                contentType: spec.mime,
+                status: 'pending',
+              })
+              .returning()
+          )[0];
       return row;
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
+      // either name could have been the loser & the error doesn't say which => retire both.
       lost.add(pathname);
+      if (slug) lostSlugs.add(slug);
     }
   }
 
   throw new Error('Could not reserve a unique filename after several attempts');
 }
+
+/** Slugs that already exist & could collide with `base` or one of its -2/-3 variants. */
+async function takenSlugs(base: string): Promise<Set<string>> {
+  const db = await getdb();
+  const prefix = base.replace(/[%_\\]/g, '\\$&');
+  const rows = await db
+    .select({ customName: files.customName })
+    .from(files)
+    .where(and(isNotNull(files.customName), sql`${files.customName} like ${prefix + '%'}`));
+  return new Set(rows.map((r) => r.customName as string));
+}
+
 
 /** Drizzle wraps driver errors, so the Postgres code sits on `cause` rather than the throwable. */
 function isUniqueViolation(error: unknown): boolean {
@@ -154,7 +207,17 @@ export async function listFiles({ q, category, cursor, limit = 50, listedOnly = 
   }
 
   if (q?.trim()) {
-    conditions.push(ilike(files.pathname, `%${q.trim()}%`) as ReturnType<typeof eq>);
+    if (listedOnly) {
+      // a protected file's real filename & extension are not public => search only what the
+      // public payload already shows, which for a locked file is the slug and nothing else.
+      // without this an anonymous visitor could probe a locked filename a character at a time.
+      conditions.push(
+        sql`case when ${files.protectedAt} is null then coalesce(${files.customName}, ${files.pathname})
+                 else ${files.customName} end ilike ${`%${q.trim()}%`}` as ReturnType<typeof eq>,
+      );
+    } else {
+      conditions.push(ilike(files.pathname, `%${q.trim()}%`) as ReturnType<typeof eq>);
+    }
   }
 
   // category isn't a column => map it to the extensions in that category & filter on those.
@@ -168,6 +231,11 @@ export async function listFiles({ q, category, cursor, limit = 50, listedOnly = 
     }
     if (exts.length > 0) {
       conditions.push(inArray(files.extension, exts) as ReturnType<typeof eq>);
+    }
+    // publicly, a locked file advertises no category at all => it belongs to no tab. otherwise
+    // filtering by "Images" would tell a stranger what a locked file is.
+    if (listedOnly) {
+      conditions.push(isNull(files.protectedAt) as ReturnType<typeof eq>);
     }
   }
 
@@ -187,9 +255,43 @@ export async function listFiles({ q, category, cursor, limit = 50, listedOnly = 
 
   const hasMore = rows.length > cap;
   const page = hasMore ? rows.slice(0, cap) : rows;
+  // the cursor is a real uploadedAt, so it reveals the page boundary timestamp of whichever row
+  // ended the page (protected or not). pagination needs an ordering key & the locked item body
+  // itself carries no dates => left as is, deliberately.
   const nextCursor = hasMore ? (page[page.length - 1].uploadedAt?.toISOString() ?? null) : null;
 
   return { rows: page, nextCursor };
+}
+
+/**
+ * Resolves /p/:slug. Explicit projection: the page only ever needs these three columns before
+ * the grant is checked, so a wider select can't accidentally end up rendered.
+ * Unknown, unprotected, pending or trashed all come back null => the page 404s on all four.
+ */
+export async function findProtectedBySlug(
+  slug: string,
+): Promise<{ id: string; customName: string | null; protectedAt: Date | null } | null> {
+  const db = await getdb();
+  const [row] = await db
+    .select({ id: files.id, customName: files.customName, protectedAt: files.protectedAt })
+    .from(files)
+    .where(
+      and(
+        eq(files.customName, slug),
+        isNotNull(files.protectedAt),
+        eq(files.status, 'ready'),
+        isNull(files.trashedAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/** Full row for the unlocked view, once the grant has been verified server side. */
+export async function findById(id: string): Promise<FileRow | null> {
+  const db = await getdb();
+  const [row] = await db.select().from(files).where(and(eq(files.id, id), isNull(files.trashedAt))).limit(1);
+  return row ?? null;
 }
 
 /** Soft delete: sets trashedAt. The blob itself is NOT removed. */
@@ -215,13 +317,30 @@ export async function setListed(id: string, listed: boolean): Promise<FileRow | 
 }
 
 export class CustomNameTakenError extends Error {}
+export class ProtectedSlugRequiredError extends Error {}
 
 /**
  * Sets or clears (null) the vanity alias. The partial unique index is the real arbiter =>
  * a collision surfaces as a 23505 which we translate rather than leak.
+ *
+ * Clearing is refused while the file is protected: /p/:slug IS the alias, so a protected file
+ * with no alias would have no URL at all. Renaming to another free slug is fine & just moves
+ * the share URL.
  */
 export async function setCustomName(id: string, customName: string | null): Promise<FileRow | null> {
   const db = await getdb();
+
+  if (customName === null) {
+    const [current] = await db
+      .select({ protectedAt: files.protectedAt })
+      .from(files)
+      .where(and(eq(files.id, id), isNull(files.trashedAt)))
+      .limit(1);
+    if (current?.protectedAt) {
+      throw new ProtectedSlugRequiredError('A password protected file needs a custom name to be shared under');
+    }
+  }
+
   try {
     const [row] = await db
       .update(files)

@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Loader2 } from 'lucide-react';
-import type { FileRow } from '@/server/db/schema';
+import type { PublicFile } from '@/lib/public-file';
 import { GalleryCard } from '@/components/files/gallery-card';
 import { Button } from '@/components/ui/button';
 
 export default function GalleryPage() {
-  const [files, setFiles] = useState<FileRow[]>([]);
+  const [files, setFiles] = useState<PublicFile[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -30,7 +30,7 @@ export default function GalleryPage() {
         setError('Could not load the gallery. Please try again.');
         return;
       }
-      const data: { rows: FileRow[]; nextCursor: string | null } = await res.json();
+      const data: { rows: PublicFile[]; nextCursor: string | null } = await res.json();
       setFiles((prev) => (replace ? data.rows : [...prev, ...data.rows]));
       setCursor(data.nextCursor);
       setHasMore(data.nextCursor !== null);

@@ -7,8 +7,9 @@ import { isDemoMode } from './lib/demo';
 // exact-match public pages/endpoints.
 const PUBLIC_PATHS = ['/', '/gallery', '/login', '/api/auth/login', '/api/gallery'];
 // prefix-matched public trees (file serving is never auth gated). /demo/ holds the bundled
-// demo assets that /f/ rewrites to in demo mode.
-const PUBLIC_PREFIXES = ['/cdn/', '/f/', '/demo/'];
+// demo assets that /f/ rewrites to in demo mode. /p/ & /api/protected/ are the per-file
+// password gate => public by design, they enforce their own boundary.
+const PUBLIC_PREFIXES = ['/cdn/', '/f/', '/demo/', '/p/', '/api/protected/'];
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;

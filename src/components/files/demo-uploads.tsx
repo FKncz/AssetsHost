@@ -47,6 +47,8 @@ export function DemoUploadsProvider({ children }: { children: React.ReactNode })
         extension,
         customName: null,
         listed: false,
+        // fake uploads are never protected => the demo's one locked file is a seed row
+        protectedAt: null,
         blobUrl: null,
         blobPathname: pathname,
         contentType: spec?.mime ?? file.type ?? 'application/octet-stream',

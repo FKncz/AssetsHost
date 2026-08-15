@@ -58,3 +58,38 @@ const MAX_CUSTOM_NAME_LENGTH = 100;
 export function isValidCustomName(input: string): boolean {
   return input.length > 0 && input.length <= MAX_CUSTOM_NAME_LENGTH && CUSTOM_NAME_RE.test(input);
 }
+
+/**
+ * Turns an original filename into a share slug for /p/:slug. A protected file always has one,
+ * so this has to succeed for any input => unicode-only or empty names fall back to "file".
+ *
+ * sanitizeStem gets us most of the way but keeps dots & underscores, which CUSTOM_NAME_RE
+ * rejects & which (in the case of a dot) could shadow a real pathname. So collapse those too.
+ */
+export function deriveSlug(originalFilename: string): string {
+  const { stem } = splitFilename(originalFilename);
+  const slug = stem
+    .replace(/[._]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    // leave room for uniquifySlug's -2 … -9999 suffix, otherwise a collision on a max length
+    // slug produces one the validator would reject on a later rename.
+    .slice(0, MAX_CUSTOM_NAME_LENGTH - 5)
+    .replace(/-+$/, '');
+
+  // paranoia rather than logic: if anything above ever lets a bad shape through, a slug that
+  // fails its own validator would be rejected later by PATCH & strand the file.
+  return isValidCustomName(slug) ? slug : 'file';
+}
+
+/** Appends -2, -3, … until the slug is free, exactly like uniquifyPathname does for filenames. */
+export function uniquifySlug(slug: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(slug)) return slug;
+
+  for (let n = 2; n < 10_000; n++) {
+    const candidate = `${slug}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+
+  throw new Error(`Could not allocate a unique slug for "${slug}"`);
+}

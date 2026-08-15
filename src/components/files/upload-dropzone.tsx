@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { UploadCloud } from 'lucide-react';
+import { Lock, UploadCloud } from 'lucide-react';
 
 import { ACCEPT_ATTRIBUTE } from '@/lib/mime';
-import { formatBytes, publicUrlFor } from '@/lib/format';
+import { formatBytes, protectedUrlFor, publicUrlFor } from '@/lib/format';
 import { uploadFile } from '@/lib/upload-client';
 import { IS_DEMO } from '@/lib/demo';
+import { Input } from '@/components/ui/input';
 import { useDemoUploads } from './demo-uploads';
 
 type UploadItem = {
@@ -18,6 +19,9 @@ type UploadItem = {
   pathname?: string;
   /** demo => the object URL to open/copy, since there's no real /f/ file behind it */
   url?: string;
+  /** protected upload => share URL is /p/:slug & the bytes need the unlock cookie */
+  slug?: string | null;
+  protected?: boolean;
   error?: string;
 };
 
@@ -46,6 +50,9 @@ function CopyButton({ value }: { value: string }) {
 export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
+  // one password applied to the whole batch => the common case is "share these three privately"
+  const [protecting, setProtecting] = useState(false);
+  const [password, setPassword] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef(0);
   const demo = useDemoUploads();
@@ -84,6 +91,8 @@ export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
       if (!fileList?.length) return;
       const batch = Array.from(fileList);
       pendingRef.current += batch.length;
+      // read the toggle once per batch so flipping it mid-upload can't half-apply
+      const batchPassword = protecting && password ? password : undefined;
 
       for (const [index, file] of batch.entries()) {
         const key = `${Date.now()}-${index}-${file.name}`;
@@ -97,8 +106,16 @@ export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
           continue;
         }
 
-        uploadFile(file, (pct) => update(key, { progress: pct }))
-          .then((result) => update(key, { status: 'done', progress: 100, pathname: result.pathname }))
+        uploadFile(file, (pct) => update(key, { progress: pct }), { password: batchPassword })
+          .then((result) =>
+            update(key, {
+              status: 'done',
+              progress: 100,
+              pathname: result.pathname,
+              slug: result.slug,
+              protected: result.protected,
+            }),
+          )
           .catch((err: Error) => update(key, { status: 'error', error: err.message }))
           .finally(() => {
             pendingRef.current -= 1;
@@ -106,7 +123,7 @@ export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
           });
       }
     },
-    [update, onBatchComplete, fakeUpload],
+    [update, onBatchComplete, fakeUpload, protecting, password],
   );
 
   return (
@@ -151,11 +168,49 @@ export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
         />
       </div>
 
+      {!IS_DEMO && (
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={protecting}
+              onChange={(e) => setProtecting(e.target.checked)}
+              className="accent-[var(--color-accent)]"
+            />
+            <Lock size={13} className="text-[var(--color-muted)]" />
+            Protect these uploads with a password
+          </label>
+
+          {protecting && (
+            <div className="mt-2 space-y-1">
+              <Input
+                type="password"
+                value={password}
+                autoComplete="new-password"
+                aria-label="Upload password"
+                placeholder="Password (6+ characters)"
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <p className="text-xs text-[var(--color-muted)]">
+                Each file gets a /p/ share link & its bytes stay unreachable until the password is entered.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {items.length > 0 && (
         <ul className="space-y-2">
           {items.map((item) => {
-            // demo carries its own object URL => real uploads resolve /f/:pathname
-            const url = item.url ?? (item.pathname ? publicUrlFor(item.pathname) : '');
+            // demo carries its own object URL. a protected upload shares as /p/:slug, since
+            // /f/:pathname would just 404 for whoever you send it to.
+            const url =
+              item.url ??
+              (item.protected && item.slug
+                ? protectedUrlFor(item.slug)
+                : item.pathname
+                  ? publicUrlFor(item.pathname)
+                  : '');
             return (
               <li
                 key={item.key}
@@ -194,6 +249,13 @@ export function UploadDropzone({ onBatchComplete }: UploadDropzoneProps) {
                       Open
                     </a>
                   </div>
+                )}
+
+                {item.status === 'done' && item.protected && (
+                  <p className="mt-1.5 flex items-center gap-1 text-xs text-amber-400">
+                    <Lock size={11} />
+                    Password protected — only this link works, & only with the password.
+                  </p>
                 )}
 
                 {item.status === 'done' && IS_DEMO && (

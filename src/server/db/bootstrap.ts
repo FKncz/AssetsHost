@@ -18,7 +18,7 @@ import { isDemoMode } from '@/lib/demo';
 import { files } from './schema';
 
 /** bump on every DDL change => existing deploys re-run it on their next boot. */
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = '2';
 const MARKER_KEY = 'schema_version';
 /** arbitrary, just has to be ours => stops two cold starts racing on create type/index. */
 const LOCK_ID = 8127346501;
@@ -41,6 +41,7 @@ const CORE_DDL = `
     extension text not null,
     custom_name text,
     listed boolean not null default false,
+    protected_at timestamptz,
     blob_url text,
     blob_pathname text not null,
     content_type text not null,
@@ -56,6 +57,7 @@ const CORE_DDL = `
   alter table files add column if not exists extension text;
   alter table files add column if not exists custom_name text;
   alter table files add column if not exists listed boolean not null default false;
+  alter table files add column if not exists protected_at timestamptz;
   alter table files add column if not exists blob_url text;
   alter table files add column if not exists blob_pathname text;
   alter table files add column if not exists content_type text;
@@ -73,6 +75,23 @@ const CORE_DDL = `
   -- without it postgres defaults desc to nulls first & every db:push would rebuild this index.
   create index if not exists files_listing_idx on files (trashed_at, uploaded_at desc nulls last);
   create index if not exists files_extension_idx on files (extension);
+  create index if not exists files_protected_idx on files (protected_at);
+
+  -- password hashes live apart from files so nothing that selects a file row can leak one.
+  create table if not exists file_protections (
+    file_id uuid primary key references files (id) on delete cascade,
+    password_hash text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  );
+
+  create table if not exists unlock_attempts (
+    key text primary key,
+    attempts integer not null default 0,
+    window_started_at timestamptz not null default now()
+  );
+
+  create index if not exists unlock_attempts_window_idx on unlock_attempts (window_started_at);
 
   create table if not exists assetshost_meta (
     key text primary key,
@@ -84,6 +103,9 @@ const CORE_DDL = `
 const TRGM_INDEX_DDL = `
   create index if not exists files_pathname_trgm_idx on files using gin (pathname gin_trgm_ops);
 `;
+
+/** tables other than `files` that CORE_DDL owns => checkdrift() just asserts they exist. */
+const SIDE_TABLES = ['file_protections', 'unlock_attempts', 'assetshost_meta'];
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -220,6 +242,21 @@ async function checkdrift(sql: Sql): Promise<void> {
         `[db] warning: ${missing.map((n) => `"${n}"`).join(', ')} ` +
           `${missing.length === 1 ? 'is' : 'are'} in schema.ts but not in the database => ` +
           'mirror the column into CORE_DDL in src/server/db/bootstrap.ts & bump SCHEMA_VERSION.',
+      );
+    }
+
+    // the column check above only covers `files`, so the side tables get a bare existence
+    // check => enough to catch a table that was added to schema.ts & never mirrored.
+    const tables = await sql<{ table_name: string }[]>`
+      select table_name from information_schema.tables where table_schema = current_schema()
+    `;
+    const livetables = new Set(tables.map((r) => r.table_name));
+    const missingtables = SIDE_TABLES.filter((name) => !livetables.has(name));
+    if (missingtables.length > 0) {
+      console.warn(
+        `[db] warning: table${missingtables.length === 1 ? '' : 's'} ` +
+          `${missingtables.map((n) => `"${n}"`).join(', ')} missing from the database => ` +
+          'mirror the create table into CORE_DDL in src/server/db/bootstrap.ts & bump SCHEMA_VERSION.',
       );
     }
   } catch {

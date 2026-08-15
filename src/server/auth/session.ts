@@ -1,42 +1,18 @@
 import { SESSION_MAX_AGE_SECONDS, config } from '../config';
+import { base64UrlDecode, base64UrlEncode, hmacSign, timingSafeEqual } from '@/lib/crypto';
 import { DEMO_PASSWORD, isDemoMode } from '@/lib/demo';
 
 /**
- * Web Crypto rather than node:crypto so the same verification runs in middleware (Edge)
- * & in route handlers (Node).
+ * The crypto primitives live in lib/crypto.ts (Web Crypto, no imports) so the same code runs
+ * in middleware (Edge) & in route handlers (Node), & so they can be unit tested without env.
  */
 
 const encoder = new TextEncoder();
 
-function base64UrlEncode(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function base64UrlDecode(value: string): Uint8Array {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
-  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
-}
-
-async function getKey(): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', encoder.encode(config.sessionSecret), { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign',
-    'verify',
-  ]);
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 /** Token format: <base64url payload>.<base64url hmac>, payload = { exp } */
 export async function createSessionToken(): Promise<string> {
   const payload = base64UrlEncode(encoder.encode(JSON.stringify({ exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000 })));
-  const signature = await crypto.subtle.sign('HMAC', await getKey(), encoder.encode(payload));
-  return `${payload}.${base64UrlEncode(new Uint8Array(signature))}`;
+  return `${payload}.${await hmacSign(config.sessionSecret, payload)}`;
 }
 
 export async function verifySessionToken(token: string | undefined): Promise<boolean> {
@@ -45,8 +21,7 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
   const [payload, signature] = token.split('.');
   if (!payload || !signature) return false;
 
-  const expected = await crypto.subtle.sign('HMAC', await getKey(), encoder.encode(payload));
-  if (!timingSafeEqual(signature, base64UrlEncode(new Uint8Array(expected)))) return false;
+  if (!timingSafeEqual(signature, await hmacSign(config.sessionSecret, payload))) return false;
 
   try {
     const { exp } = JSON.parse(new TextDecoder().decode(base64UrlDecode(payload)));

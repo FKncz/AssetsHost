@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 export const fileStatus = pgEnum('file_status', ['pending', 'ready']);
 
@@ -21,6 +21,14 @@ export const files = pgTable(
     /** Off by default => a fresh upload is URL reachable but hidden from the public gallery. */
     listed: boolean('listed').notNull().default(false),
 
+    /**
+     * Not null => the file carries its own password & is only reachable through /p/:slug.
+     * Doubles as the grant version: rotating the password rewrites this, which retires every
+     * outstanding unlock cookie. The hash itself lives in file_protections, never here, so no
+     * existing select().from(files) can leak it.
+     */
+    protectedAt: timestamp('protected_at', { withTimezone: true }),
+
     blobUrl: text('blob_url'),
     blobPathname: text('blob_pathname').notNull(),
 
@@ -40,12 +48,44 @@ export const files = pgTable(
     uniqueIndex('files_custom_name_key').on(t.customName).where(sql`${t.customName} is not null`),
     index('files_listing_idx').on(t.trashedAt, t.uploadedAt.desc()),
     index('files_extension_idx').on(t.extension),
+    index('files_protected_idx').on(t.protectedAt),
     index('files_pathname_trgm_idx').using('gin', sql`${t.pathname} gin_trgm_ops`),
   ],
 );
 
 export type FileRow = typeof files.$inferSelect;
 export type NewFileRow = typeof files.$inferInsert;
+
+/**
+ * Per-file password hashes, split off files on purpose: the only reader is
+ * getProtectionHash() in protection.service.ts, so a stray `select().from(files)` that ends
+ * up in a public payload can't carry the hash with it.
+ */
+export const fileProtections = pgTable('file_protections', {
+  fileId: uuid('file_id')
+    .primaryKey()
+    .references(() => files.id, { onDelete: 'cascade' }),
+  /** pbkdf2$sha256$<iters>$<salt>$<hash>, params inline so they can be raised later. */
+  passwordHash: text('password_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Fixed window counters for the unlock endpoint. In Postgres rather than a process local Map
+ * because Vercel runs many short lived instances => an in-memory counter resets on every cold
+ * start, which is the same as no limit at all.
+ */
+export const unlockAttempts = pgTable(
+  'unlock_attempts',
+  {
+    /** "<fileId>:ip:<hmac>" for one client, "<fileId>:all" for the per-file backstop. */
+    key: text('key').primaryKey(),
+    attempts: integer('attempts').notNull().default(0),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('unlock_attempts_window_idx').on(t.windowStartedAt)],
+);
 
 /**
  * Bookkeeping for the boot time schema bootstrap (src/server/db/bootstrap.ts): it stores the

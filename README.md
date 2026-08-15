@@ -28,6 +28,9 @@ https://cdn.example.com/f/demo-clip.mp4
   concerns; a file is public only when you list it.
 - **Protect** the dashboard behind a single shared password and a signed session
   cookie. No user database to run.
+- **Lock individual files** behind their own password. A locked file is shared at
+  `/p/<name>`, reveals nothing but its name until the password is typed, and is a
+  flat "not found" to everyone else.
 - **Try it first.** A zero-dependency demo mode runs the whole app with no
   Postgres, Blob, or secrets, seeded with sample files. There's one
   [running here](https://demoassets-host.vercel.app/).
@@ -38,28 +41,96 @@ and lets the app own caching and headers.
 
 ## Deploy your own
 
-No local setup at all, this runs on Vercel's free tier.
+No local setup at all, this runs on Vercel's free tier. Four steps, roughly 15
+minutes, all of it clicking buttons on three websites: GitHub (holds the code),
+Neon (the database), Vercel (runs the site & stores the files).
 
-1. **Fork [Creative-Softworks/AssetsHost](https://github.com/Creative-Softworks/AssetsHost)**
-   with the Fork button at the top of the page.
-2. Open [vercel.com/new](https://vercel.com/new) and import your fork. Next.js is
-   auto-detected, so leave the build settings alone.
-3. In the project's **Storage** tab, create a **Blob store**. Vercel injects
-   `BLOB_READ_WRITE_TOKEN` for you.
-4. Still in **Storage**, add a **Postgres** database (or bring your own from Neon,
-   Supabase, etc.) and make sure `DATABASE_URL` is set.
-5. Under **Settings → Environment Variables**, add `SESSION_SECRET` and
-   `AUTH_PASSWORD` (see the table below).
-6. **Deploy.**
+Keep a scratch notepad open, you'll copy a few values between the steps.
+
+### 1. Fork the repo
+
+Open [Creative-Softworks/AssetsHost](https://github.com/Creative-Softworks/AssetsHost),
+click **Fork** at the top-right, then **Create fork**. You now have your own copy at
+`github.com/YOUR-USERNAME/AssetsHost` and you never have to touch the code in it.
+
+### 2. Get a Postgres database (Neon)
+
+The database only stores the file list, names and which files are listed publicly.
+The files themselves go to Blob storage in step 4.
+
+1. Go to **[neon.com](https://neon.com)** and click **Sign Up** in the top-right.
+   **Continue with GitHub** is quickest.
+2. Neon asks you to create a project immediately:
+   - **Project name**: anything, e.g. `assetshost`.
+   - **Postgres version**: leave the default.
+   - **Region**: pick the location closest to you.
+3. Click the green **Create Project**.
+
+Neon makes a database called `neondb` for you. That one's fine, no need to add
+another.
+
+Now copy the **connection string** — one long piece of text holding the address,
+username and password together. It's what goes in `DATABASE_URL`.
+
+4. Click **Dashboard** at the top of the left sidebar.
+5. Find the **Connection Details** panel and make sure the **Database** dropdown
+   says `neondb`.
+6. Turn **Pooled connection** **ON**. This app runs as Vercel serverless functions,
+   which open lots of short-lived connections, and pooling is what keeps that from
+   exhausting the database. (If there's no toggle, check for `-pooler` in the
+   hostname, that means it's already pooled.)
+7. Click the **copy** icon next to the line starting with `postgresql://` and paste
+   it in your notepad.
+
+Any other Postgres host works too. On Supabase it's **Project Settings → Database →
+Connection string**, and you want the pooled "Transaction" one.
+
+### 3. Import to Vercel
+
+1. Go to **[vercel.com](https://vercel.com)**, click **Sign Up**, choose **Continue
+   with GitHub**, and **Authorize** if asked.
+2. In the dashboard click **Add New…** (top-right) → **Project**.
+3. Under **Import Git Repository** find **AssetsHost** and click **Import**.
+4. Leave **Project Name**, **Framework Preset** and all build settings alone,
+   Next.js is auto-detected.
+5. Expand **Environment Variables** and add these three. Type the name in **Key**,
+   paste the value in **Value**, click **Add**, repeat.
+
+   | Key | Value |
+   |---|---|
+   | `DATABASE_URL` | the `postgresql://…` string from step 2 |
+   | `SESSION_SECRET` | a random 32+ character string ([generate one](#configuration)) |
+   | `AUTH_PASSWORD` | the password you want to type to reach the dashboard |
+
+6. Click **Deploy** at the bottom and wait a minute or two. You get confetti and a
+   **Congratulations!** screen when it's done.
+
+### 4. Add the Blob store
+
+The site is live now, but has nowhere to put uploads yet.
+
+1. Click **Continue to Dashboard**, then open the **Storage** tab.
+2. Click **Create Database** (or **Connect Store**), choose **Blob**, name it
+   anything, confirm. Vercel wires it up and injects `BLOB_READ_WRITE_TOKEN`, you
+   never copy that one yourself.
+3. Go to **Deployments**, open the **…** menu on the newest one, and hit
+   **Redeploy** so the app picks the token up.
+
+Then click your `.vercel.app` link under **Domains**, open the **control panel**,
+log in with the `AUTH_PASSWORD` you chose, and drag a file in.
 
 That's it, there's no schema step. On its first boot the app creates its own tables,
 indexes and the `pg_trgm` extension in whatever database `DATABASE_URL` points at,
 then records what it did so later boots skip straight past. Point it at an empty
 Neon or Supabase database and it just works.
 
-Log in with the `AUTH_PASSWORD` you chose and start uploading. Pushes to `main`
-auto-deploy from then on, and you can pull upstream changes into your fork with
-GitHub's **Sync fork** button.
+Pushes to `main` auto-deploy from then on, and you can pull upstream changes into
+your fork with GitHub's **Sync fork** button.
+
+**If something's off:** a build failing on `DATABASE_URL`, or a login that rejects
+your password, almost always means a missing or misspelled environment variable.
+Uploads failing means step 4 was skipped. And Vercel only picks up variable changes
+on a new deployment, so redeploy after editing any of them.
 
 Want to see it before committing to any of that? Try the
 [live demo](https://demoassets-host.vercel.app/) (password `outofmemory`), or deploy
@@ -157,6 +228,40 @@ the URL). A file being reachable by URL does not mean it shows up in any public
 listing, a file appears in the gallery only when you toggle it on. This keeps
 "share this one link" and "put this on the public wall" as two different actions.
 
+## Password protected files
+
+Any file can carry its own password, separate from the dashboard login. Set it
+while uploading, or later from the file's card in the dashboard.
+
+A protected file is shared at **`/p/<name>`** instead of the plain file URL. Until
+the right password is entered, that page shows the file's name and nothing else:
+no thumbnail, no size, no type. The file URL itself doesn't help either, it
+answers "not found" for anyone without the password, exactly as if the file had
+never existed. Protected files can still be listed in the gallery; they show up as
+a lock, and clicking through lands on the unlock page.
+
+Some details worth knowing:
+
+- **Unlocking lasts an hour**, per file, in that one browser.
+- **Changing or removing the password locks everyone out immediately**, including
+  anyone who unlocked the file a minute ago.
+- **You stay in** — logged into the dashboard, you can open and preview your own
+  protected files without typing their passwords.
+- **Guessing is capped**, 5 tries per visitor per 10 minutes (and 30 per file, so
+  rotating IPs doesn't help). Wrong guesses say only "incorrect password".
+- **Passwords are stored hashed** (PBKDF2-SHA256, 210k iterations), never in
+  plain text, and a lost password can't be recovered, only replaced.
+- **Locking a file that was already public doesn't un-share the copies already
+  out there.** A public file is cached hard (a year) by browsers and CDN edges, so
+  adding a password stops new downloads, not ones already cached. If a file was
+  public and shouldn't have been, treat the URL as burned.
+- **Pick a real password.** Guessing is capped, but on a self-hosted deploy with no
+  trusted proxy in front the per-visitor cap can be sidestepped by faking the
+  client IP; the per-file cap still holds it to roughly 4000 guesses a day, which
+  is plenty to find a dictionary word.
+- **No extra configuration.** The feature reuses `SESSION_SECRET`; there are no
+  new environment variables.
+
 ## Demo mode
 
 A demo instance is live at
@@ -183,6 +288,8 @@ In demo mode:
 - **Uploads fake success.** The file shows up and is interactive through an
   in-browser `blob:` URL, carries a "showcase only" disclaimer, and vanishes on
   reload.
+- **One file is password protected** so you can try that flow too. Its password is
+  the same `outofmemory`.
 
 Default behavior (both flags unset) is completely unchanged. Every demo branch is
 gated, so self-hosters get the normal app with zero overhead.
@@ -201,18 +308,20 @@ src/
 │   ├── api/
 │   │   ├── auth/…               ← session management
 │   │   ├── upload/…             ← reserve → upload → complete flow
-│   │   ├── files/…             ← list (paginated/search/filter), delete, rename, list toggle
+│   │   ├── files/…             ← list (paginated/search/filter), delete, rename, list toggle, password
 │   │   ├── gallery/route.ts     ← public listing of "listed" files
+│   │   ├── protected/…          ← unlock endpoint for password protected files
 │   │   └── stats/route.ts       ← total files + storage used
-│   └── cdn/[...path]/route.ts    ← public file serving (no auth)
-├── components/files/…            ← upload dropzone, file grid/card, gallery card, stats bar
+│   ├── p/[slug]/page.tsx         ← share page for a password protected file (no auth)
+│   └── cdn/[...path]/route.ts    ← file serving (no auth; protected files need an unlock)
+├── components/files/…            ← upload dropzone, file grid/card, gallery card, unlock form, stats bar
 ├── server/
-│   ├── services/                 ← files.service.ts, storage.service.ts (Blob boundary)
+│   ├── services/                 ← files, storage (Blob boundary), protection, rate limit
 │   ├── demo/                     ← in-memory dataset used only in demo mode
 │   ├── db/schema.ts              ← Drizzle schema
 │   ├── db/bootstrap.ts           ← creates the schema on first boot
-│   └── auth/…                   ← session tokens + password verification
-└── lib/…                        ← upload client, filename/mime helpers, formatters
+│   └── auth/…                   ← session tokens, password verification, unlock grants
+└── lib/…                        ← upload client, crypto, filename/mime helpers, formatters
 ```
 
 ## Serving from your own domain
@@ -229,8 +338,20 @@ pnpm dev        # start the dev server on port 5000
 pnpm build      # production build
 pnpm start      # serve the production build
 pnpm typecheck  # type-check without emitting
+pnpm test       # unit tests (node --test, no framework)
 pnpm db:push    # push the Drizzle schema (bootstrap handles a normal deploy)
 ```
+
+There's also an end to end check for the password protected flow. With `pnpm dev`
+running in another shell:
+
+```bash
+node scripts/smoke-protected.mjs
+```
+
+It inserts a temporary protected row, asserts that the file is unreachable while
+locked, that unlocking works, that a password change revokes access, that guessing
+gets rate limited, then deletes what it made.
 
 ## Contributing
 
@@ -246,3 +367,7 @@ Now here we are. You can use it, do whatever you want with it, just don't share 
 ## License
 
 [MIT](./LICENSE) © revxshafi
+
+---
+
+<sub>This readme was compiled with assistance of AI.</sub>

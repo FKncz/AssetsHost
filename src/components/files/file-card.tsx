@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Copy, ExternalLink, Trash2, Check, Eye, EyeOff, Pencil, X } from 'lucide-react';
+import { Copy, ExternalLink, Trash2, Check, Eye, EyeOff, Pencil, X, Lock, LockOpen } from 'lucide-react';
 import type { FileRow } from '@/server/db/schema';
 import { getFileTypeSpec } from '@/lib/mime';
-import { formatBytes, publicUrlFor } from '@/lib/format';
+import { formatBytes, originFileUrlFor, protectedUrlFor, publicUrlFor } from '@/lib/format';
 import { IS_DEMO } from '@/lib/demo';
 import { FileIcon } from './file-icon';
 import { useDemoUploads } from './demo-uploads';
@@ -48,6 +48,15 @@ export function FileCard({ file, onDelete }: FileCardProps) {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const togglingRef = useRef(false);
 
+  // per-file password. the hash never comes back from the API, so all the card ever knows is
+  // whether one is set.
+  const [isProtected, setIsProtected] = useState(file.protectedAt !== null);
+  const [editingPassword, setEditingPassword] = useState(false);
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [confirmingUnprotect, setConfirmingUnprotect] = useState(false);
+
   // focus the alias field when the editor opens, replacing the autofocus attribute
   // (which steals focus from assistive tech the moment the card mounts).
   useEffect(() => {
@@ -60,11 +69,24 @@ export function FileCard({ file, onDelete }: FileCardProps) {
   //  - session-only fake upload (demo) => its in-browser object URL
   //  - other demo rows => the real bundled asset at /f/:pathname (ignore the alias for the actual
   //    fetch so a for-show rename can't break the thumbnail/open; the alias still shows as a label)
+  //  - protected => the /p/ share page, which is the only URL that works for a recipient
   //  - production => the vanity alias when set, else the pathname
   const demo = useDemoUploads();
   const sessionUrl = demo?.urlFor(file.id);
   const isSessionUpload = Boolean(sessionUrl);
-  const url = sessionUrl ?? (IS_DEMO ? publicUrlFor(file.pathname) : publicUrlFor(customName ?? file.pathname));
+  const shareUrl =
+    isProtected && customName ? protectedUrlFor(customName) : publicUrlFor(customName ?? file.pathname);
+  const url = sessionUrl ?? (IS_DEMO ? publicUrlFor(file.pathname) : shareUrl);
+  // previews keep working for the admin because /cdn honours the session cookie as a bypass —
+  // but only on the app origin. the session cookie is host scoped, so a protected file routed
+  // through NEXT_PUBLIC_CDN_HOST would 404 there; stay on this origin for those.
+  const previewUrl =
+    sessionUrl ??
+    (IS_DEMO
+      ? publicUrlFor(file.pathname)
+      : isProtected
+        ? originFileUrlFor(customName ?? file.pathname)
+        : publicUrlFor(customName ?? file.pathname));
   const isImage = category === 'image' && file.extension !== 'svg';
 
   async function handleCopy() {
@@ -125,6 +147,39 @@ export function FileCard({ file, onDelete }: FileCardProps) {
     }
   }
 
+  /**
+   * Sets, rotates or removes the password. `password: ''` is the remove signal, matching the
+   * empty-string-clears convention the alias field already uses. A rotation invalidates every
+   * unlock cookie for this file server side, so nobody keeps access across a change.
+   */
+  async function savePassword(next: string | '') {
+    setSavingPassword(true);
+    setPasswordError('');
+    try {
+      const res = await fetch(`/api/files/${file.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: next }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setPasswordError(err.error ?? 'Could not save');
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      setIsProtected(Boolean(data.file?.protected));
+      // setProtection derives a slug when the file had none => pick it up so Copy URL is right
+      if (data.file?.slug !== undefined) setCustomName(data.file.slug);
+      setPasswordDraft('');
+      setEditingPassword(false);
+    } catch {
+      setPasswordError('Could not save');
+    } finally {
+      setSavingPassword(false);
+      setConfirmingUnprotect(false);
+    }
+  }
+
   async function handleDelete() {
     if (!confirming) {
       setConfirming(true);
@@ -146,7 +201,7 @@ export function FileCard({ file, onDelete }: FileCardProps) {
       <div className="relative flex h-28 items-center justify-center overflow-hidden bg-[var(--color-bg)]">
         {isImage ? (
           <img
-            src={url}
+            src={previewUrl}
             alt={file.pathname}
             className="h-full w-full object-cover"
             loading="lazy"
@@ -171,6 +226,15 @@ export function FileCard({ file, onDelete }: FileCardProps) {
           {listed ? <Eye size={12} /> : <EyeOff size={12} />}
           {listed ? 'Listed' : 'Hidden'}
         </button>
+        {isProtected && (
+          <span
+            title="Password protected — only /p/:slug works for a recipient"
+            className="absolute left-2 top-2 flex items-center gap-1 rounded-md bg-amber-500/90 px-2 py-1 text-xs font-medium text-white backdrop-blur"
+          >
+            <Lock size={12} />
+            Protected
+          </span>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 p-3">
@@ -224,6 +288,82 @@ export function FileCard({ file, onDelete }: FileCardProps) {
           </button>
         )}
 
+        {/* password row. a session-only fake upload has no server row to protect => hide it there. */}
+        {!isSessionUpload &&
+          (editingPassword ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-1">
+                <input
+                  type="password"
+                  value={passwordDraft}
+                  aria-label={isProtected ? 'New password' : 'Password'}
+                  onChange={(e) => setPasswordDraft(e.target.value)}
+                  placeholder={isProtected ? 'New password' : 'Password'}
+                  className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-amber-500"
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => savePassword(passwordDraft)}
+                  disabled={savingPassword || passwordDraft.length === 0}
+                  aria-label="Save password"
+                >
+                  <Check size={12} />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditingPassword(false);
+                    setPasswordDraft('');
+                    setPasswordError('');
+                  }}
+                  aria-label="Cancel"
+                >
+                  <X size={12} />
+                </Button>
+              </div>
+              {passwordError && <p className="text-xs text-red-400">{passwordError}</p>}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingPassword(true)}
+                className={`flex items-center gap-1 text-left text-xs transition-colors ${
+                  isProtected
+                    ? 'text-amber-400 hover:text-amber-300'
+                    : 'text-[var(--color-muted)] hover:text-[var(--color-fg)]'
+                }`}
+              >
+                <Lock size={11} />
+                {isProtected ? 'Change password' : 'Add password'}
+              </button>
+              {isProtected && (
+                /* same two-step the delete button uses => removing a password unlocks the bytes
+                   for anyone holding the link, so one stray click shouldn't do it. */
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!confirmingUnprotect) {
+                      setConfirmingUnprotect(true);
+                      setTimeout(() => setConfirmingUnprotect(false), 3000);
+                      return;
+                    }
+                    savePassword('');
+                  }}
+                  disabled={savingPassword}
+                  aria-label={confirmingUnprotect ? 'Confirm remove password' : 'Remove password'}
+                  className="ml-auto flex items-center gap-1 text-xs text-[var(--color-muted)] transition-colors hover:text-red-400"
+                >
+                  <LockOpen size={11} />
+                  {confirmingUnprotect ? 'Sure?' : 'Remove'}
+                </button>
+              )}
+            </div>
+          ))}
+        {!editingPassword && passwordError && <p className="text-xs text-red-400">{passwordError}</p>}
+
         <div className="flex items-center gap-2">
           <CategoryBadge category={category} />
           <span className="ml-auto text-xs text-[var(--color-muted)]">{formatBytes(file.size)}</span>
@@ -237,7 +377,7 @@ export function FileCard({ file, onDelete }: FileCardProps) {
             {copied ? 'Copied' : 'Copy URL'}
           </Button>
           <a
-            href={url}
+            href={previewUrl}
             target="_blank"
             rel="noreferrer"
             aria-label="Open file"

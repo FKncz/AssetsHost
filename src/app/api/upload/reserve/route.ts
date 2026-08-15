@@ -1,5 +1,6 @@
 import { requireAuth } from '@/server/auth/guard';
 import { UnsupportedFileTypeError, reserveUpload, sweepStalePending } from '@/server/services/files.service';
+import { WeakPasswordError, assertUsablePassword } from '@/server/services/protection.service';
 import { isDemoMode } from '@/lib/demo';
 
 export async function POST(request: Request) {
@@ -13,8 +14,9 @@ export async function POST(request: Request) {
   }
 
   let filename: unknown;
+  let password: unknown;
   try {
-    ({ filename } = await request.json());
+    ({ filename, password } = await request.json());
   } catch {
     return Response.json({ error: 'Invalid request' }, { status: 400 });
   }
@@ -23,11 +25,34 @@ export async function POST(request: Request) {
     return Response.json({ error: 'filename is required' }, { status: 400 });
   }
 
-  void sweepStalePending();
+  // the password only ever arrives in a POST body => never a query string, never a URL.
+  let protect: string | undefined;
+  if (password !== undefined && password !== null && password !== '') {
+    if (typeof password !== 'string') {
+      return Response.json({ error: 'password must be a string' }, { status: 400 });
+    }
+    try {
+      assertUsablePassword(password);
+    } catch (error) {
+      if (error instanceof WeakPasswordError) return Response.json({ error: error.message }, { status: 400 });
+      throw error;
+    }
+    protect = password;
+  }
+
+  // same fire & forget as the unlock route: a failed sweep must not become an unhandled rejection
+  void sweepStalePending().catch(() => {});
 
   try {
-    const row = await reserveUpload(filename);
-    return Response.json({ id: row.id, pathname: row.pathname, contentType: row.contentType });
+    const row = await reserveUpload(filename, { password: protect });
+    return Response.json({
+      id: row.id,
+      pathname: row.pathname,
+      contentType: row.contentType,
+      // the client needs these to show the right share URL for the finished upload
+      slug: row.customName,
+      protected: row.protectedAt !== null,
+    });
   } catch (error) {
     if (error instanceof UnsupportedFileTypeError) {
       return Response.json({ error: error.message }, { status: 415 });
@@ -35,3 +60,4 @@ export async function POST(request: Request) {
     throw error;
   }
 }
+

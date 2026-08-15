@@ -17,6 +17,8 @@ type DemoSeed = {
   customName?: string;
   /** minutes ago the file was "uploaded" => gives a stable, sensible ordering */
   agoMinutes: number;
+  /** password protected => shows as a locked card & only opens through /p/:customName */
+  locked?: true;
 };
 
 // stable fake ids so a client only rename/toggle round-trips against the same row
@@ -28,6 +30,16 @@ const SEEDS: DemoSeed[] = [
   { pathname: 'readme.txt', size: 412, listed: false, agoMinutes: 1_440 },
   { pathname: 'welcome.pdf', size: 36_088, listed: false, agoMinutes: 2_880 },
   { pathname: 'assets-bundle.zip', size: 2_081, listed: false, agoMinutes: 4_320 },
+  // reuses a bundled asset so the showcase has one visibly locked card in the gallery. the
+  // demo password (src/lib/demo.ts) opens it.
+  {
+    pathname: 'sunset-gradient.jpg',
+    size: 28_940,
+    listed: true,
+    customName: 'locked-preview',
+    agoMinutes: 30,
+    locked: true,
+  },
 ];
 
 // pinned epoch so uploadedAt (& therefore cursors) are deterministic across requests
@@ -48,6 +60,7 @@ export const DEMO_FILES: FileRow[] = SEEDS.map((seed, i) => {
     extension,
     customName: seed.customName ?? null,
     listed: seed.listed,
+    protectedAt: seed.locked ? uploadedAt : null,
     blobUrl: null,
     blobPathname: seed.pathname,
     contentType: spec?.mime ?? 'application/octet-stream',
@@ -59,6 +72,11 @@ export const DEMO_FILES: FileRow[] = SEEDS.map((seed, i) => {
     trashedAt: null,
   } satisfies FileRow;
 });
+
+/** Demo stand-in for findProtectedBySlug. Same null-on-anything-unexpected contract. */
+export function findDemoProtectedBySlug(slug: string): FileRow | null {
+  return DEMO_FILES.find((f) => f.protectedAt && f.customName === slug && !f.trashedAt) ?? null;
+}
 
 export type ListDemoOptions = {
   q?: string;
@@ -78,11 +96,18 @@ export function listDemoFiles({ q, category, cursor, limit = 50, listedOnly = fa
 
   if (q?.trim()) {
     const needle = q.trim().toLowerCase();
-    rows = rows.filter((f) => f.pathname.toLowerCase().includes(needle));
+    // mirrors listFiles: publicly, a locked file is only searchable by its slug, never by the
+    // real filename it doesn't advertise.
+    rows = rows.filter((f) => {
+      const haystack = listedOnly && f.protectedAt ? (f.customName ?? '') : f.pathname;
+      return haystack.toLowerCase().includes(needle);
+    });
   }
 
   if (category) {
     rows = rows.filter((f) => FILE_TYPES[f.extension]?.category === category);
+    // a locked file advertises no category => it belongs to no public tab
+    if (listedOnly) rows = rows.filter((f) => !f.protectedAt);
   }
 
   // newest first, matching the desc(uploadedAt) ordering the real query uses

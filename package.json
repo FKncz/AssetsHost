@@ -29,6 +29,7 @@
     "build": "next build",
     "start": "next start -p 5000 -H 0.0.0.0",
     "typecheck": "tsc --noEmit",
+    "test": "node --import ./tests/alias-hook.mjs --test 'tests/*.test.ts'",
     "db:push": "node scripts/db-push.mjs"
   },
   "dependencies": {

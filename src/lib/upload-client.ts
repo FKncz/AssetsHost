@@ -8,6 +8,14 @@ export type UploadResult = {
   pathname: string;
   size: number;
   contentType: string;
+  /** set when the upload was protected => the share URL is /p/:slug, not /f/:pathname */
+  slug?: string | null;
+  protected?: boolean;
+};
+
+export type UploadOptions = {
+  /** Applied at reserve time, so the file is protected before it is ever servable. */
+  password?: string;
 };
 
 async function postJson(url: string, body: unknown): Promise<Response> {
@@ -27,8 +35,15 @@ async function errorFrom(response: Response, fallback: string): Promise<Error> {
  * Three steps: reserve a unique name server side, upload browser to Blob (bypassing the
  * 4.5MB function body limit), then confirm so the server records authoritative metadata.
  */
-export async function uploadFile(file: File, onProgress: (percentage: number) => void): Promise<UploadResult> {
-  const reserveResponse = await postJson('/api/upload/reserve', { filename: file.name });
+export async function uploadFile(
+  file: File,
+  onProgress: (percentage: number) => void,
+  options: UploadOptions = {},
+): Promise<UploadResult> {
+  const reserveResponse = await postJson('/api/upload/reserve', {
+    filename: file.name,
+    password: options.password,
+  });
   if (!reserveResponse.ok) throw await errorFrom(reserveResponse, 'Could not reserve a filename');
   const reservation = await reserveResponse.json();
 
@@ -44,5 +59,8 @@ export async function uploadFile(file: File, onProgress: (percentage: number) =>
   const completeResponse = await postJson('/api/upload/complete', { id: reservation.id });
   if (!completeResponse.ok) throw await errorFrom(completeResponse, 'Could not finalize the upload');
 
-  return completeResponse.json();
+  const result = await completeResponse.json();
+  // the reservation is the only place that knows the slug => carry it through so the dropzone
+  // can show the /p/ share URL rather than a /f/ one that would 404 for the recipient.
+  return { ...result, slug: reservation.slug ?? null, protected: Boolean(reservation.protected) };
 }
